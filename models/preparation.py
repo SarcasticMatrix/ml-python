@@ -68,3 +68,11 @@ def compute_correlation(data:pd.DataFrame, method:str = 'pearson'):
             )       
 
     return correlation
+
+
+def do_the_job():
+    """
+    -> TO DO <-
+    Prépare deux dataframe nettoyés et préparés: input, output.
+    Objectif: juste utiliser cette fonction pour préparer les données pour chaque modèle
+    """

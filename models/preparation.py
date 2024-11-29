@@ -8,6 +8,8 @@ Fonctions princaples :
 - `import_data`: Importation et nettoyage initial d'un fichier de données.
 - `compute_correlation`: Calcul et visualisation de la matrice de corrélation pour les variables numériques.
 - `variables_selection`: Sélection des variables avec des corrélations inférieures à un seuil donné.
+- `encode': One Hot Encoding des variables catégorielles.
+- `normalise`: normalise les variables numériques.
 - `do_the_job`: Pipeline complet pour préparer les données pour un modèle.
 
 """
@@ -15,6 +17,9 @@ Fonctions princaples :
 import pandas as pd
 import numpy as np
 import seaborn as sns
+import sklearn.preprocessing as preproc
+from sklearn.preprocessing import LabelEncoder
+
 pd.options.mode.use_inf_as_na = True # '' ou numpy.inf considérées comme des NA
 
 def import_data(
@@ -80,7 +85,7 @@ def get_dtypes(data:pd.DataFrame) -> dict:
     
     return dtype_to_column
 
-def compute_correlation(data:pd.DataFrame, method:str = 'pearson'):
+def compute_correlation(data:pd.DataFrame, method:str = 'pearson', plot_bool:bool = True):
     """
     Calcule, affiche sous forme de heatmap, et retourne la matrice de corrélation pour les variables numériques.
 
@@ -103,26 +108,28 @@ def compute_correlation(data:pd.DataFrame, method:str = 'pearson'):
     # Calcul de la corrélation
     dtype_to_column = get_dtypes(data)
     labels_numériques = dtype_to_column[np.dtype('float64')] + dtype_to_column[np.dtype('int64')]
-    vars_numériques = data[labels_numériques]
-    correlation = np.round(vars_numériques.corr(method=method).abs(),2)
+    vars_numeriques = data[labels_numériques]
+    correlation = np.round(vars_numeriques.corr(method=method).abs(),2)
 
-    # Heatmap des corrélations
-    upper_indices = np.triu_indices_from(correlation, k=1)  # Indices au-dessus de la diagonale
-    correlation_to_be_showed = correlation.copy()
-    correlation_to_be_showed.values[upper_indices] = None  # Remplacer par None au dessus de la diagonale
-    
-    sns.heatmap(correlation_to_be_showed, 
-                center=0.5, 
-                cmap=sns.diverging_palette(220, 20, as_cmap=True), 
-                annot=True, 
-                annot_kws={'alpha':0.5, "color": 'white'}
-            )       
+    if plot_bool:
+        # Heatmap des corrélations
+        upper_indices = np.triu_indices_from(correlation, k=1)  # Indices au-dessus de la diagonale
+        correlation_to_be_showed = correlation.copy()
+        correlation_to_be_showed.values[upper_indices] = None  # Remplacer par None au dessus de la diagonale
+        
+        sns.heatmap(correlation_to_be_showed, 
+                    center=0.5, 
+                    cmap=sns.diverging_palette(220, 20, as_cmap=True), 
+                    annot=True, 
+                    annot_kws={'alpha':0.5, "color": 'white'}
+                )       
 
     return correlation
 
 def variables_selection(
         data:pd.DataFrame,
         correlation_threshold:float = 0.95,
+        plot_bool:bool = False
     ) -> pd.DataFrame:
     """
     Sélectionne les colonnes numériques ayant une corrélation inférieure à un seuil donné.
@@ -143,7 +150,7 @@ def variables_selection(
     - Supprime ces colonnes du dataframe.
     """
 
-    correlation = compute_correlation(data=data)
+    correlation = compute_correlation(data=data, plot_bool=plot_bool)
 
     # Séléctionne la matrice triangulaire supérieure
     upper = correlation.where(np.triu(np.ones(correlation.shape), k=1).astype(bool))
@@ -155,10 +162,64 @@ def variables_selection(
 
     return data
 
+def encode(data:pd.DataFrame) -> pd.DataFrame:
+    """
+    Effectue un encodage One-Hot des colonnes catégorielles d'un dataframe.
+
+    Paramètres :
+    ------------
+    - `data` (pd.DataFrame) : Le dataframe contenant les données à encoder.
+
+    Retour :
+    --------
+    - `pd.DataFrame` : Un nouveau dataframe contenant les colonnes encodées.
+    """
+
+    labels_categorielles = get_dtypes(data)[np. dtype('O')]
+    vars_categorielles = data[labels_categorielles].copy()
+    data = data.drop(columns=labels_categorielles)
+
+    #One hot encoding des variables catégorielles
+    preproc_ohe = preproc.OneHotEncoder(handle_unknown='ignore')
+    preproc_ohe = preproc.OneHotEncoder(drop='first', sparse_output = False).fit(vars_categorielles) 
+
+    variables_categorielles_ohe = preproc_ohe.transform(vars_categorielles)
+    variables_categorielles_ohe = pd.DataFrame(variables_categorielles_ohe, 
+                                            columns = preproc_ohe.get_feature_names_out(vars_categorielles.columns))
+    return pd.concat([data, variables_categorielles_ohe], axis=1)
+
+
+def normalise(data:pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalise les colonnes numériques d'un dataframe en utilisant une standardisation (moyenne à 0 et écart-type à 1).
+
+    Paramètres :
+    ------------
+    - `data` (pd.DataFrame) : Le dataframe contenant les données à normaliser.
+
+    Retour :
+    --------
+    - `pd.DataFrame` : Un dataframe contenant uniquement les colonnes numériques, normalisées.
+    """
+
+    # Liste des variables numériques
+    dtype_to_column = get_dtypes(data)
+    labels_numériques = dtype_to_column[np.dtype('float64')]
+    vars_numeriques = data[labels_numériques]
+    
+    # Scale les variables numériques
+    preproc_scale = preproc.StandardScaler(with_mean=True, with_std=True)
+    preproc_scale.fit(vars_numeriques)
+    vars_numeriques_scaled = preproc_scale.transform(vars_numeriques)
+    vars_numeriques_scaled = pd.DataFrame(vars_numeriques_scaled, 
+                                columns = vars_numeriques.columns)
+    data[labels_numériques] = vars_numeriques_scaled[labels_numériques]
+    return data
 
 def do_the_job(
-        path:str,
+        path: str = 'models/data/data.csv',
         correlation_threshold:float = 0.95,
+        plot_bool:bool = False,
     ) -> pd.DataFrame:
     """
     Pipeline complet pour préparer les données pour un modèle.
@@ -182,8 +243,20 @@ def do_the_job(
     """
 
     data = import_data(path)
-    data = variables_selection(data, correlation_threshold)
-    input = data['y'].copy()
-    output = data.drop(columns='y').copy()
+    data = variables_selection(data, correlation_threshold, plot_bool)
+
+    # Sélectionne ouput et input
+    output = data['y'].copy()
+    input = data.drop(columns='y').copy()
+
+    # Normalise variables numériques
+    input = normalise(input)
+
+    # One hot encoding variables catégorielles
+    input = encode(input)
+
+    # Encoder les labels
+    label_encoder = LabelEncoder()
+    output = label_encoder.fit_transform(output)
 
     return {'input':input, 'output':output}

@@ -121,7 +121,7 @@ def compute_correlation(data:pd.DataFrame, method:str = 'pearson', plot_bool:boo
                     center=0.5, 
                     cmap=sns.diverging_palette(220, 20, as_cmap=True), 
                     annot=True, 
-                    annot_kws={'alpha':0.5, "color": 'white'}
+                    annot_kws={'alpha':0.5, "color": 'black'}
                 )       
 
     return correlation

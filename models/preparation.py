@@ -7,6 +7,7 @@ Fonctions princaples :
 -----------
 - `import_data`: Importation et nettoyage initial d'un fichier de données.
 - `compute_correlation`: Calcul et visualisation de la matrice de corrélation pour les variables numériques.
+- `point_biserial_correlation`: Calcul et visualisation de la matrice de corrélation pour tout les variables.
 - `variables_selection`: Sélection des variables avec des corrélations inférieures à un seuil donné.
 - `encode': One Hot Encoding des variables catégorielles.
 - `normalise`: normalise les variables numériques.
@@ -19,6 +20,8 @@ import numpy as np
 import seaborn as sns
 import sklearn.preprocessing as preproc
 from sklearn.preprocessing import LabelEncoder
+from scipy.stats import pointbiserialr
+
 
 pd.options.mode.use_inf_as_na = True # '' ou numpy.inf considérées comme des NA
 
@@ -84,6 +87,40 @@ def get_dtypes(data:pd.DataFrame) -> dict:
         dtype_to_column[column_to_dtype[key]].append(key)
     
     return dtype_to_column
+
+def point_biserial_correlation(data,plot=False):
+    """
+    Calculate the point-biserial correlation for all pairs of columns in the dataframe.
+
+    Args:
+        data (pd.DataFrame): The input dataframe containing the data.
+        plot (bool, optional): If True, plots a heatmap of the correlations. Defaults to False.
+    """
+    all_columns = data.columns
+
+    point_biserial_corr = {
+    (col1, col2): pointbiserialr(
+        data[col1].cat.codes if data[col1].dtype.name == 'category' else data[col1],
+        data[col2].cat.codes if data[col2].dtype.name == 'category' else data[col2],
+    )
+    for col1 in all_columns for col2 in all_columns if col1 != col2
+    }
+
+    point_biserial_corr=pd.DataFrame(point_biserial_corr)
+    def star_significance(pval):
+        if pval.iloc[0] < 0.05:
+            return '*'
+        else:
+            return ''
+    point_biserial_corr=point_biserial_corr.apply(lambda x: (round(x[[0]],4)).astype("str")+star_significance(x[[1]]))
+
+    point_biserial_corr=point_biserial_corr.stack().loc[0].fillna("1")
+    if plot:
+        point_biserial_corr_numeric = point_biserial_corr.applymap(lambda x: (x.rstrip('*'))).astype(float)
+        sns.heatmap(point_biserial_corr_numeric, annot=point_biserial_corr, fmt='', cmap='coolwarm', center=0, annot_kws={"size": 10})
+
+    else:
+        return point_biserial_corr
 
 def compute_correlation(data:pd.DataFrame, method:str = 'pearson', plot_bool:bool = True):
     """

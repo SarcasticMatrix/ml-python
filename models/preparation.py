@@ -88,50 +88,14 @@ def get_dtypes(data:pd.DataFrame) -> dict:
         dtype_to_column[column_to_dtype[key]].append(key)
     
     return dtype_to_column
+
 def point_biserial_correlation(data,plot=False):
     """
-    Calculate the point-biserial correlation for all pairs of columns in the dataframe.
+    Calculer la corrélation point-bisériale pour toutes les paires de colonnes dans le dataframe.
 
-    Args:
-        data (pd.DataFrame): The input dataframe containing the data.
-        plot (bool, optional): If True, plots a heatmap of the correlations. Defaults to False.
-    """
-    all_columns = data.columns
-
-    point_biserial_corr = {
-    (col1, col2): pointbiserialr(
-        data[col1].cat.codes if data[col1].dtype.name == 'category' else data[col1],
-        data[col2].cat.codes if data[col2].dtype.name == 'category' else data[col2],
-    )
-    for col1 in all_columns for col2 in all_columns if col1 != col2
-}
-
-    point_biserial_corr=pd.DataFrame(point_biserial_corr)
-    def star_significance(pval):
-        if pval.iloc[0] < 0.05:
-            return '*'
-        else:
-            return ''
-    point_biserial_corr=point_biserial_corr.apply(lambda x: (round(x[[0]],4)).astype("str")+star_significance(x[[1]]))
-
-    point_biserial_corr=point_biserial_corr.stack().loc[0].fillna("1")
-    if plot:
-        point_biserial_corr_numeric = point_biserial_corr.applymap(lambda x: (x.rstrip('*'))).astype(float)
-        plt.figure(figsize=(20, 20))
-        sns.heatmap(point_biserial_corr_numeric, annot=point_biserial_corr, fmt='', cmap='coolwarm', center=0, annot_kws={"size": 10})
-        plt.title('Point Biserial Correlation Heatmap with Significance Stars')
-        plt.xticks(rotation=45, ha='right', fontsize=10)
-        plt.yticks(fontsize=10)
-        plt.show()
-    else:
-        return point_biserial_corr
-def point_biserial_correlation(data,plot=False):
-    """
-    Calculate the point-biserial correlation for all pairs of columns in the dataframe.
-
-    Args:
-        data (pd.DataFrame): The input dataframe containing the data.
-        plot (bool, optional): If True, plots a heatmap of the correlations. Defaults to False.
+    Arguments :
+        data (pd.DataFrame) : Le dataframe d'entrée contenant les données.
+        plot (bool, optionnel) : Si True, affiche une carte thermique des corrélations. Par défaut False.
     """
     all_columns = data.columns
 

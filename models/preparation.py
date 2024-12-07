@@ -22,6 +22,13 @@ import sklearn.preprocessing as preproc
 from sklearn.preprocessing import LabelEncoder
 from scipy.stats import pointbiserialr
 from matplotlib import pyplot as plt
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.pipeline import Pipeline
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+
+
 
 
 pd.options.mode.use_inf_as_na = True # '' ou numpy.inf considérées comme des NA
@@ -299,3 +306,86 @@ def do_the_job(
     output = label_encoder.fit_transform(output)
 
     return {'input':input, 'output':output}
+class FeatureEngineering(BaseEstimator, TransformerMixin):
+    """
+    A custom transformer for feature engineering in a machine learning pipeline.
+    Methods
+    -------
+    __init__():
+        Initializes the transformer.
+    fit(X, y=None):
+        Fits the transformer to the data. This transformer does not learn from the data, so this method returns self.
+    transform(X):
+        Transforms the input DataFrame by performing various feature engineering steps:
+        - Drops the `duration` column.
+        - Replaces 999 in `pdays` column with -1.
+        - Converts object type columns to categorical type.
+        - Creates a new `prev_contact` column based on `pdays` with specified bins and labels.
+        - Creates a new `age_cat` column based on `age` with specified bins and labels.
+        - Creates a new `campaign_efficiency` column based on `previous` and `campaign` columns.
+        - Adds the first principal component applied to economic factors as `EconStabSentPCA`.
+        - Drops specified columns and returns the transformed DataFrame.
+    
+    -------
+    pandas.DataFrame
+        The transformed DataFrame with new features and selected columns.
+        
+    Example
+    -------
+
+    pipeline = Pipeline([
+        ('Feature_Engineering', FeatureEngineering()),
+    ])
+
+    data_path = r'models\data\data.csv'
+    raw_data = pd.read_csv(data_path, delimiter=';')
+
+    cleaned_data = pipeline.fit_transform(raw_data)
+    cleaned_data.head()
+    
+    """
+    def fit(self, X, y=None):return self
+    
+    def transform(self, X):
+        X = X.drop(columns='duration').copy()
+        X['pdays'] = X['pdays'].replace(999, -1)
+        
+        for column in X.select_dtypes(include='object').columns:
+            X[column] = X[column].astype('category')
+        
+        X['prev_contact'] = pd.cut(X['pdays'], 
+                                    bins=[-1, 0, 8, 16, 28],
+                                    right=False,
+                                    labels=['Never', '[0-7]', '[7-15]', '15<'])
+        
+        X['age_cat'] = pd.cut(X['age'], 
+                                bins=[0, 23-0.01, 30-0.01, 40-0.01, 60-0.01, 100], 
+                                labels=['[0-23[', '[23-30[', '[30-40[', '[40-60[', '60<'])
+        
+        X['campaign_efficiency'] = X.apply(lambda row: row['previous'] / row['campaign'] if row['poutcome'] == 'success' else 0, axis=1)
+        
+        economic_factors = X[['cons.price.idx', 'cons.conf.idx', 'emp.var.rate', 'euribor3m', 'nr.employed']]
+        scaler = StandardScaler()
+        economic_factors_scaled = scaler.fit_transform(economic_factors)
+        
+        pca = PCA(n_components=2)
+        principal_components = pca.fit_transform(economic_factors_scaled)
+        principal_components = pd.DataFrame(principal_components, columns=['PC1', 'PC2'])
+        
+        X['EconStabSentPCA'] = principal_components["PC1"]
+        
+        cols_to_drop = ['pdays', 'age', 'previous', 'poutcome'] + economic_factors.columns.drop('cons.conf.idx').tolist()
+        data4analysis = X.drop(columns=cols_to_drop)
+        
+        return data4analysis
+
+if __name__=="__main__":
+    pipeline = Pipeline([
+        ('Feature_Engineering', FeatureEngineering()),
+        ])
+    
+    data_path = r'models\data\data.csv'
+    raw_data = pd.read_csv(data_path, delimiter=';')
+
+    cleaned_data = pipeline.fit_transform(raw_data)
+    print(cleaned_data.head())

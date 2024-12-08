@@ -7,7 +7,6 @@ Fonctions princaples :
 -----------
 - `import_data`: Importation et nettoyage initial d'un fichier de données.
 - `compute_correlation`: Calcul et visualisation de la matrice de corrélation pour les variables numériques.
-- `point_biserial_correlation`: Calcul et visualisation de la matrice de corrélation pour tout les variables.
 - `variables_selection`: Sélection des variables avec des corrélations inférieures à un seuil donné.
 - `encode': One Hot Encoding des variables catégorielles.
 - `normalise`: normalise les variables numériques.
@@ -19,10 +18,10 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import sklearn.preprocessing as preproc
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
-from scipy.stats import pointbiserialr
-from matplotlib import pyplot as plt
-
+from scipy.stats import chi2_contingency
+from sklearn.impute import KNNImputer
 
 pd.options.mode.use_inf_as_na = True # '' ou numpy.inf considérées comme des NA
 
@@ -49,9 +48,9 @@ def import_data(
             data[column] = data[column].astype(str)  # Convertit en chaîne de caractères
 
     # Clean les NAs, '' ou np.inf
-    if True in np.unique(data.isna()):
-        data.dropna(how='any')
-        print('Quelques NAs, "" ou np.inf - on les drop')
+    #if True in np.unique(data.isna()):
+    #    data.dropna(how='any')
+    #    print('Quelques NAs, "" ou np.inf - on les drop')
 
     return data
 
@@ -89,41 +88,6 @@ def get_dtypes(data:pd.DataFrame) -> dict:
     
     return dtype_to_column
 
-def point_biserial_correlation(data,plot=False):
-    """
-    Calculate the point-biserial correlation for all pairs of columns in the dataframe.
-
-    Args:
-        data (pd.DataFrame): The input dataframe containing the data.
-        plot (bool, optional): If True, plots a heatmap of the correlations. Defaults to False.
-    """
-    all_columns = data.columns
-
-    point_biserial_corr = {
-    (col1, col2): pointbiserialr(
-        data[col1].cat.codes if data[col1].dtype.name == 'category' else data[col1],
-        data[col2].cat.codes if data[col2].dtype.name == 'category' else data[col2],
-    )
-    for col1 in all_columns for col2 in all_columns if col1 != col2
-    }
-
-    point_biserial_corr=pd.DataFrame(point_biserial_corr)
-    def star_significance(pval):
-        if pval.iloc[0] < 0.05:
-            return '*'
-        else:
-            return ''
-    point_biserial_corr=point_biserial_corr.apply(lambda x: (round(x[[0]],4)).astype("str")+star_significance(x[[1]]))
-
-    point_biserial_corr=point_biserial_corr.stack().loc[0].fillna("1")
-    if plot:
-        point_biserial_corr_numeric = point_biserial_corr.applymap(lambda x: (x.rstrip('*'))).astype(float)
-        plt.figure(figsize=(20, 20))
-        sns.heatmap(point_biserial_corr_numeric, annot=point_biserial_corr, fmt='', cmap='coolwarm', center=0, annot_kws={"size": 10})
-
-    else:
-        return point_biserial_corr
-
 def compute_correlation(data:pd.DataFrame, method:str = 'pearson', plot_bool:bool = True):
     """
     Calcule, affiche sous forme de heatmap, et retourne la matrice de corrélation pour les variables numériques.
@@ -160,7 +124,7 @@ def compute_correlation(data:pd.DataFrame, method:str = 'pearson', plot_bool:boo
                     center=0.5, 
                     cmap=sns.diverging_palette(220, 20, as_cmap=True), 
                     annot=True, 
-                    annot_kws={'alpha':0.5, "color": 'black'}
+                    annot_kws={'alpha':0.5, "color": 'white'}
                 )       
 
     return correlation
@@ -201,63 +165,219 @@ def variables_selection(
 
     return data
 
-def encode(data:pd.DataFrame) -> pd.DataFrame:
+def cramers_v_table(df, plot_bool: bool = True):
     """
-    Effectue un encodage One-Hot des colonnes catégorielles d'un dataframe.
+    Calcule et affiche la table du V de Cramér pour toutes les paires de variables catégorielles dans un DataFrame.
+    
+    Paramètres :
+        df (pd.DataFrame) : Le DataFrame contenant les variables catégorielles.
+        plot_bool (bool) : Indique si une heatmap doit être affichée. Par défaut : True.
+        
+    Retourne :
+        pd.DataFrame : Une matrice carrée contenant les valeurs du V de Cramér pour chaque paire de colonnes.
+    """
+    # Sélection des colonnes catégorielles
+    categorical_cols = df.select_dtypes(include=['O']).columns
+    
+    # Initialisation de la matrice de résultats
+    cramers_v_matrix = pd.DataFrame(index=categorical_cols, columns=categorical_cols, dtype=float)
+    
+    # Calcul du V de Cramér pour chaque paire
+    for col1 in categorical_cols:
+        for col2 in categorical_cols:
+            if col1 == col2:
+                cramers_v_matrix.loc[col1, col2] = 1.0  # Corrélation parfaite avec soi-même
+            else:
+                # Table de contingence pour les deux colonnes
+                contingency_table = pd.crosstab(df[col1], df[col2])
+                
+                # Calcul du Chi-carré
+                chi2, _, _, _ = chi2_contingency(contingency_table)
+                n = contingency_table.sum().sum()  # Taille totale des données
+                k, r = contingency_table.shape
+                # Calcul du V de Cramér
+                cramers_v = np.sqrt(chi2 / (n * (min(k - 1, r - 1))))
+                cramers_v_matrix.loc[col1, col2] = cramers_v
+
+    # Affiche une heatmap si demandé
+    if plot_bool:
+        # Masquer les valeurs au-dessus de la diagonale
+        upper_indices = np.triu_indices_from(cramers_v_matrix, k=1)
+        cramers_v_to_show = cramers_v_matrix.copy()
+        cramers_v_to_show.values[upper_indices] = None
+
+        # Heatmap
+        sns.heatmap(
+            cramers_v_to_show, 
+            cmap=sns.diverging_palette(220, 20, as_cmap=True), 
+            annot=True, 
+            center=0.5, 
+            annot_kws={'alpha': 0.5, "color": 'white'}
+        )
+    
+    return cramers_v_matrix
+
+
+def categorical_variables_selection(data: pd.DataFrame, testcramerV_threshold: float = 0.95, plot_bool: bool = False) -> pd.DataFrame:
+    """
+    Sélectionne les colonnes catégorielles ayant une corrélation inférieure à un seuil donné.
 
     Paramètres :
     ------------
-    - `data` (pd.DataFrame) : Le dataframe contenant les données à encoder.
+    - `data` (pd.DataFrame) : Le dataframe contenant les données.
+    - `testcramerV_threshold` (float, optionnel) : Seuil de corrélation au-delà duquel une colonne sera supprimée. Par défaut : `0.95`.
+    - `plot_bool` (bool, optionnel) : Indique si une heatmap doit être affichée. Par défaut : False.
 
     Retour :
     --------
-    - `pd.DataFrame` : Un nouveau dataframe contenant les colonnes encodées.
+    - `pd.DataFrame` : Le dataframe avec les colonnes non corrélées sélectionnées.
     """
-
-    labels_categorielles = get_dtypes(data)[np. dtype('O')]
-    vars_categorielles = data[labels_categorielles].copy()
-    data = data.drop(columns=labels_categorielles)
-
-    #One hot encoding des variables catégorielles
-    preproc_ohe = preproc.OneHotEncoder(handle_unknown='ignore')
-    preproc_ohe = preproc.OneHotEncoder(drop='first', sparse_output = False).fit(vars_categorielles) 
-
-    variables_categorielles_ohe = preproc_ohe.transform(vars_categorielles)
-    variables_categorielles_ohe = pd.DataFrame(variables_categorielles_ohe, 
-                                            columns = preproc_ohe.get_feature_names_out(vars_categorielles.columns))
-    return pd.concat([data, variables_categorielles_ohe], axis=1)
+    # Calcul de la matrice des V de Cramér
+    correlation = cramers_v_table(data, plot_bool=plot_bool)
+    
+    # Sélectionne la matrice triangulaire supérieure
+    upper = correlation.where(np.triu(np.ones(correlation.shape), k=1).astype(bool))
+    
+    # Trouve les colonnes à supprimer
+    to_drop = [column for column in upper.columns if any(upper[column] > testcramerV_threshold)]
+    
+    # Retourne les colonnes catégorielles non corrélées
+    return data.drop(columns=to_drop)
 
 
-def normalise(data:pd.DataFrame) -> pd.DataFrame:
+# def encode(data:pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Effectue un encodage One-Hot des colonnes catégorielles d'un dataframe.
+
+#     Paramètres :
+#     ------------
+#     - `data` (pd.DataFrame) : Le dataframe contenant les données à encoder.
+
+#     Retour :
+#     --------
+#     - `pd.DataFrame` : Un nouveau dataframe contenant les colonnes encodées.
+#     """
+
+#     labels_categorielles = get_dtypes(data)[np. dtype('O')]
+#     vars_categorielles = data[labels_categorielles].copy()
+#     data = data.drop(columns=labels_categorielles)
+
+#     #One hot encoding des variables catégorielles
+#     preproc_ohe = preproc.OneHotEncoder(handle_unknown='ignore')
+#     preproc_ohe = preproc.OneHotEncoder(drop='first', sparse_output = False).fit(vars_categorielles) 
+
+#     variables_categorielles_ohe = preproc_ohe.transform(vars_categorielles)
+#     variables_categorielles_ohe = pd.DataFrame(variables_categorielles_ohe, 
+#                                             columns = preproc_ohe.get_feature_names_out(vars_categorielles.columns))
+#     return pd.concat([data, variables_categorielles_ohe], axis=1)d
+
+def encode(data: pd.DataFrame, method: str = "ordinal") -> pd.DataFrame:
     """
-    Normalise les colonnes numériques d'un dataframe en utilisant une standardisation (moyenne à 0 et écart-type à 1).
+    Encode les variables catégorielles d'un DataFrame en numérique.
+
+    Paramètres :
+    ------------
+    - `data` (pd.DataFrame) : Le DataFrame contenant les variables à encoder.
+    - `method` (str, optionnel) : Méthode d'encodage à utiliser. Options :
+        - `"ordinal"` (par défaut) : Encode les catégories avec des entiers (LabelEncoder).
+        - `"onehot"` : Encode avec des vecteurs binaires (One-Hot Encoding).
+
+    Retour :
+    --------
+    - `pd.DataFrame` : Le DataFrame avec les colonnes catégorielles encodées.
+
+    Description :
+    -------------
+    - Identifie les colonnes catégorielles dans le DataFrame.
+    - Applique l'encodage choisi à ces colonnes.
+    - Retourne un nouveau DataFrame avec les colonnes encodées.
+    """
+    # Copie du DataFrame pour éviter les modifications sur l'original
+    encoded_data = data.copy()
+
+    # Identifier les colonnes catégorielles
+    categorical_cols = encoded_data.select_dtypes(include=['O']).columns
+
+    # Appliquer l'encodage
+    if method == "ordinal":
+        # Utilise LabelEncoder pour chaque colonne catégorielle
+        for col in categorical_cols:
+            le = LabelEncoder()
+            encoded_data[col] = le.fit_transform(encoded_data[col])
+    elif method == "onehot":
+        # Utilise pd.get_dummies pour One-Hot Encoding
+        encoded_data = pd.get_dummies(encoded_data, columns=categorical_cols, drop_first=True)
+    else:
+        raise ValueError("Méthode d'encodage invalide. Utilisez 'ordinal' ou 'onehot'.")
+    
+    return encoded_data
+
+def normalize(data: pd.DataFrame, columns_to_scale: list) -> pd.DataFrame:
+    """
+    Normalise uniquement les colonnes spécifiées dans une liste en utilisant une standardisation 
+    (moyenne à 0 et écart-type à 1).
 
     Paramètres :
     ------------
     - `data` (pd.DataFrame) : Le dataframe contenant les données à normaliser.
+    - `columns_to_scale` (list) : La liste des noms de colonnes à scaler.
 
     Retour :
     --------
-    - `pd.DataFrame` : Un dataframe contenant uniquement les colonnes numériques, normalisées.
+    - `pd.DataFrame` : Un dataframe avec les colonnes spécifiées normalisées.
     """
 
-    # Liste des variables numériques
-    dtype_to_column = get_dtypes(data)
-    labels_numériques = dtype_to_column[np.dtype('float64')]
-    vars_numeriques = data[labels_numériques]
+    # Vérifie si les colonnes spécifiées existent dans le dataframe
+    for col in columns_to_scale:
+        if col not in data.columns:
+            raise ValueError(f"La colonne '{col}' n'existe pas dans le DataFrame.")
     
-    # Scale les variables numériques
+    # Scale uniquement les colonnes spécifiées
     preproc_scale = preproc.StandardScaler(with_mean=True, with_std=True)
-    preproc_scale.fit(vars_numeriques)
-    vars_numeriques_scaled = preproc_scale.transform(vars_numeriques)
-    vars_numeriques_scaled = pd.DataFrame(vars_numeriques_scaled, 
-                                columns = vars_numeriques.columns)
-    data[labels_numériques] = vars_numeriques_scaled[labels_numériques]
+    preproc_scale.fit(data[columns_to_scale])
+    scaled_columns = preproc_scale.transform(data[columns_to_scale])
+    
+    # Remplace les colonnes dans le DataFrame d'origine
+    data[columns_to_scale] = scaled_columns
+    
     return data
+
+
+def knnImpute(data: pd.DataFrame, columns: list, n_neighbors: int) -> pd.DataFrame:
+    """
+    Remplace les valeurs manquantes (NaN) dans les colonnes spécifiées par la classe majoritaire des n_neighbors
+    plus proches voisins en utilisant l'algorithme KNN.
+
+    Paramètres :
+    -------------
+    - `data` (pd.DataFrame) : Le dataframe contenant les données à imputer.
+    - `columns` (list) : Liste des noms des colonnes où les valeurs manquantes doivent être imputées.
+    - `n_neighbors` (int) : Le nombre de voisins à prendre en compte pour l'imputation.
+
+    Retour :
+    --------
+    - `pd.DataFrame` : Le dataframe avec les valeurs manquantes imputées.
+    """
+    
+    # Sélectionner uniquement les colonnes spécifiées
+    data_to_impute = data[columns]
+    
+    # Appliquer KNN Imputer
+    knn_imputer = KNNImputer(n_neighbors=n_neighbors, weights='uniform')
+    
+    # Imputation des NaN (pour les colonnes spécifiées)
+    data_imputed = knn_imputer.fit_transform(data_to_impute)
+    
+    # Remplacer les colonnes dans le dataframe original avec les nouvelles valeurs imputées
+    data[columns] = data_imputed
+    
+    return data
+
 
 def do_the_job(
         path: str = 'models/data/data.csv',
         correlation_threshold:float = 0.95,
+        cramers_vthreshold:float = 0.95,
         plot_bool:bool = False,
     ) -> pd.DataFrame:
     """
@@ -284,12 +404,15 @@ def do_the_job(
     data = import_data(path)
     data = variables_selection(data, correlation_threshold, plot_bool)
 
+    #AJOUT IDRISS: POUR REMPLACER LES UNKNOWN PAR NAN
+    data = data.replace('unknown', np.nan)
+
     # Sélectionne ouput et input
     output = data['y'].copy()
     input = data.drop(columns='y').copy()
 
     # Normalise variables numériques
-    input = normalise(input)
+    input = normalize(input)
 
     # One hot encoding variables catégorielles
     input = encode(input)
@@ -299,3 +422,64 @@ def do_the_job(
     output = label_encoder.fit_transform(output)
 
     return {'input':input, 'output':output}
+
+
+
+def plot_all_histograms(df, bins=10, figsize=(15, 8)):
+    """
+    Trace des histogrammes pour toutes les colonnes d'un DataFrame pandas, y compris les colonnes numériques et catégoriques.
+    
+    Colonnes numériques : Histogramme avec des intervalles (bins).
+    Colonnes catégoriques : Graphique en barres des fréquences des classes.
+
+    Paramètres :
+        df (pd.DataFrame) : Le DataFrame contenant les données.
+        bins (int) : Nombre d'intervalles pour les histogrammes numériques. Par défaut, 10.
+        figsize (tuple) : Taille de la figure par ligne. Par défaut, (15, 8).
+
+    Retourne :
+        None
+    """
+    # Séparer les colonnes numériques et catégoriques
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    categorical_cols = df.select_dtypes(exclude=['number']).columns
+
+    # Combiner toutes les colonnes à tracer
+    all_columns = list(numeric_cols) + list(categorical_cols)
+
+    num_cols = len(all_columns)
+    if num_cols == 0:
+        print("Aucune colonne à tracer.")
+        return
+
+    # Définir le nombre d'histogrammes par ligne
+    histograms_per_row = 4
+    n_rows = (num_cols + histograms_per_row - 1) // histograms_per_row  # Calculer le nombre de lignes nécessaires
+
+    fig, axes = plt.subplots(nrows=n_rows, ncols=histograms_per_row, figsize=(figsize[0], figsize[1] * n_rows))
+    axes = axes.flatten()  # Aplatir les axes pour une itération facile
+
+    # Tracer chaque colonne
+    for i, col in enumerate(all_columns):
+        ax = axes[i]
+        if col in numeric_cols:
+            # Histogramme pour les colonnes numériques
+            ax.hist(df[col].dropna(), bins=bins, alpha=0.7, color='blue', edgecolor='black')
+            ax.set_title(f"Histogramme de {col}")
+            ax.set_xlabel(col)
+            ax.set_ylabel("Fréquence")
+        else:
+            # Graphique en barres pour les colonnes catégoriques
+            value_counts = df[col].value_counts()
+            ax.bar(value_counts.index, value_counts.values, color='orange', edgecolor='black', alpha=0.7)
+            ax.set_title(f"Graphique en barres de {col}")
+            ax.set_xlabel(col)
+            ax.set_ylabel("Fréquence")
+            ax.tick_params(axis='x', rotation=45)  # Tourner les étiquettes de l'axe x pour une meilleure lisibilité
+
+    # Masquer les sous-graphiques inutilisés
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
+
+    plt.tight_layout()
+    plt.show()

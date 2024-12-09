@@ -25,7 +25,6 @@ from matplotlib import pyplot as plt
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 
 
 
@@ -365,7 +364,7 @@ class FeatureEngineering(BaseEstimator, TransformerMixin):
         X['campaign_efficiency'] = X.apply(lambda row: row['previous'] / row['campaign'] if row['poutcome'] == 'success' else 0, axis=1)
         
         economic_factors = X[['cons.price.idx', 'cons.conf.idx', 'emp.var.rate', 'euribor3m', 'nr.employed']]
-        scaler = StandardScaler()
+        scaler = preproc.StandardScaler()
         economic_factors_scaled = scaler.fit_transform(economic_factors)
         
         pca = PCA(n_components=2)
@@ -375,17 +374,104 @@ class FeatureEngineering(BaseEstimator, TransformerMixin):
         X['EconStabSentPCA'] = principal_components["PC1"]
         
         cols_to_drop = ['pdays', 'age', 'previous', 'poutcome'] + economic_factors.columns.drop('cons.conf.idx').tolist()
-        data4analysis = X.drop(columns=cols_to_drop)
+        data4analysis = X
+        # data4analysis = X.drop(columns=cols_to_drop)
         
         return data4analysis
+
+
+class Preprocessing(BaseEstimator, TransformerMixin):
+    """
+    A stramlined preprocessing transformer that:
+    - Encodes categorical features using OneHotEncoder.
+    - Scales numerical features using StandardScaler.
+    - Encodes target variable (y) using LabelEncoder.
+
+    Attributes
+    ----------
+    cat_encoder_ : OneHotEncoder
+        Encoder for categorical variables.
+
+    num_scaler_ : StandardScaler
+        Scaler for numerical variables.
+
+    label_encoder_ : LabelEncoder
+        Encoder for the target variable (y).
+
+    Parameters
+    ----------
+    scale : bool, default=True
+        Whether to scale numerical features.
+
+    encode : bool, default=True
+        Whether to encode categorical features.
+    """
+    def __init__(self, scale=True, encode=True):
+        self.scale = scale
+        self.encode = encode
+
+    def fit(self, X, y=None):
+        """
+        Fit encoders and scalers to the data.
+        """
+        self.cat_cols_ = X.select_dtypes(include=["object", "category"]).columns.tolist()
+        self.num_cols_ = X.select_dtypes(include=[np.number]).columns.tolist()
+
+        if self.encode and self.cat_cols_:
+            self.cat_encoder_ = preproc.OneHotEncoder(sparse_output=False, handle_unknown="ignore").fit(X[self.cat_cols_])
+
+        if self.scale and self.num_cols_:
+            self.num_scaler_ = preproc.StandardScaler().fit(X[self.num_cols_])
+
+        if y is not None:
+            self.label_encoder_ = LabelEncoder().fit(y)
+
+        return self
+
+    def transform(self, X, y=None):
+        """
+        Transform the data by encoding and scaling.
+        """
+        X_transformed = X.copy()
+
+        if self.encode and self.cat_cols_:
+            encoded = self.cat_encoder_.transform(X_transformed[self.cat_cols_])
+            encoded_df = pd.DataFrame(encoded, columns=self.cat_encoder_.get_feature_names_out(self.cat_cols_))
+            X_transformed = pd.concat([X_transformed[self.num_cols_].reset_index(drop=True), encoded_df.reset_index(drop=True)], axis=1)
+            X_transformed.columns = [col.replace('[', '').replace(']', '').replace('<', 'lt') for col in X_transformed.columns]
+
+        if self.scale and self.num_cols_:
+            X_transformed[self.num_cols_] = self.num_scaler_.transform(X_transformed[self.num_cols_])
+
+        y_transformed = None
+        if y is not None and hasattr(self, "label_encoder_"):
+            y_transformed = self.label_encoder_.transform(y)
+            
+        return X_transformed, y_transformed
+
+    def fit_transform(self, X, y=None):
+        """
+        Fit and transform the data in a single step.
+        """
+        return self.fit(X, y).transform(X, y)
+
+    def inverse_transform_y(self, y):
+        """
+        Inverse transform target variable (y) to its original labels.
+        """
+        if hasattr(self, "label_encoder_"):
+            return self.label_encoder_.inverse_transform(y)
+        raise ValueError("Label encoder has not been fitted.")
+
 
 if __name__=="__main__":
     pipeline = Pipeline([
         ('Feature_Engineering', FeatureEngineering()),
+        ('preprocessing', Preprocessing()),
         ])
     
     data_path = r'models\data\data.csv'
     raw_data = pd.read_csv(data_path, delimiter=';')
 
-    cleaned_data = pipeline.fit_transform(raw_data)
-    print(cleaned_data.head())
+    X,y = pipeline.fit_transform(raw_data.drop(columns='y'), raw_data['y'])
+    print(X,y)

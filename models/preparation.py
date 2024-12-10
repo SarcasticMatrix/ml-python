@@ -25,6 +25,7 @@ from matplotlib import pyplot as plt
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.decomposition import PCA
+from typing import Literal
 
 
 
@@ -95,7 +96,7 @@ def get_dtypes(data:pd.DataFrame) -> dict:
     
     return dtype_to_column
 
-def point_biserial_correlation(data,plot=False):
+def point_biserial_correlation(data,plot=False,skip_segnificance=False):
     """
     Calculer la corrélation point-bisériale pour toutes les paires de colonnes dans le dataframe.
 
@@ -119,7 +120,8 @@ def point_biserial_correlation(data,plot=False):
             return '*'
         else:
             return ''
-    point_biserial_corr=point_biserial_corr.apply(lambda x: (round(x[[0]],4)).astype("str")+star_significance(x[[1]]))
+    if not skip_segnificance:
+        point_biserial_corr=point_biserial_corr.apply(lambda x: (round(x[[0]],4)).astype("str")+star_significance(x[[1]]))
 
     point_biserial_corr=point_biserial_corr.stack().loc[0].fillna("1")
     if plot:
@@ -406,7 +408,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
     encode : bool, default=True
         Whether to encode categorical features.
     """
-    def __init__(self, scale=True, encode=True):
+    def __init__(self, scale: bool = True, encode: Literal["Categorical", "OneHot", False] = False):
         self.scale = scale
         self.encode = encode
 
@@ -414,31 +416,33 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         """
         Fit encoders and scalers to the data.
         """
-        self.cat_cols_ = X.select_dtypes(include=["object", "category"]).columns.tolist()
+        self.cat_cols_ = X.select_dtypes(include=["category"]).columns.tolist()
         self.num_cols_ = X.select_dtypes(include=[np.number]).columns.tolist()
 
-        if self.encode and self.cat_cols_:
-            self.cat_encoder_ = preproc.OneHotEncoder(sparse_output=False, handle_unknown="ignore").fit(X[self.cat_cols_])
+        if self.cat_cols_:
+            if self.encode == "Categorical":
+                self.cat_encoder_ = preproc.CategoricalEncoder().fit(X[self.cat_cols_])
+            elif self.encode == "OneHot":
+                self.cat_encoder_ = preproc.OneHotEncoder(sparse_output=False, handle_unknown="error").fit(X[self.cat_cols_])
 
         if self.scale and self.num_cols_:
             self.num_scaler_ = preproc.StandardScaler().fit(X[self.num_cols_])
 
         if y is not None:
-            self.label_encoder_ = LabelEncoder().fit(y)
+            self.label_encoder_ = preproc.LabelEncoder().fit(y)
 
         return self
 
     def transform(self, X, y=None):
-        """
-        Transform the data by encoding and scaling.
-        """
         X_transformed = X.copy()
 
         if self.encode and self.cat_cols_:
-            encoded = self.cat_encoder_.transform(X_transformed[self.cat_cols_])
-            encoded_df = pd.DataFrame(encoded, columns=self.cat_encoder_.get_feature_names_out(self.cat_cols_))
-            X_transformed = pd.concat([X_transformed[self.num_cols_].reset_index(drop=True), encoded_df.reset_index(drop=True)], axis=1)
-            X_transformed.columns = [col.replace('[', '').replace(']', '').replace('<', 'lt') for col in X_transformed.columns]
+            if self.encode == "OneHot":
+                encoded_cols = self.cat_encoder_.transform(X_transformed[self.cat_cols_])
+                encoded_df = pd.DataFrame(encoded_cols, columns=self.cat_encoder_.get_feature_names_out(self.cat_cols_), index=X_transformed.index)
+                X_transformed = X_transformed.drop(columns=self.cat_cols_).join(encoded_df)
+            else:
+                X_transformed[self.cat_cols_] = self.cat_encoder_.transform(X_transformed[self.cat_cols_])
 
         if self.scale and self.num_cols_:
             X_transformed[self.num_cols_] = self.num_scaler_.transform(X_transformed[self.num_cols_])

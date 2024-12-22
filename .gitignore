@@ -168,3 +168,4 @@ Main Notebook *.ipynb
 Naive Take.ipynb
 models/data/data_impute_knn.csv
 models/data/data_processed.csv
+Pics/*
